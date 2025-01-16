@@ -17,6 +17,7 @@ import remote from '@electron/remote/main';
 import { release } from 'os'
 import { join } from 'path'
 import { readdirSync, readFileSync } from 'fs';
+import OSC from 'node-osc';
 
 remote.initialize();
 
@@ -42,6 +43,11 @@ process.env['ELECTRON_DISABLE_SECURITY_WARNINGS'] = 'true'
 let win: BrowserWindow | null = null
 let widgetWindow: BrowserWindow | null = null
 let tray: Tray | null = null;
+// Create a new OSC client
+let oscClient = null;
+let hrConnectedPath = '/avatar/parameters/hr_connected';
+let hrPercentPath = '/avatar/parameters/hr_percent';
+let maxHeartRate = 200;
 // Here, you can also use other preload
 const preload = join(__dirname, '../preload/index.js')
 
@@ -51,6 +57,29 @@ const appPackagedHtml = join(process.env.DIST, 'index.html')
 const widgetViewPath = (widgetName: string, entry: string = 'widget.html') => {
   return join(app.isPackaged ? process.env.DIST : process.env.VITE_DEV_SERVER_URL, `addons/widgets/${widgetName}/${entry}`);
 }
+
+const configureOSC = (ip, port, paths, maxHr) => {
+  oscClient = new OSC.Client(ip, port);
+  hrConnectedPath = paths.hrConnected || hrConnectedPath;
+  hrPercentPath = paths.hrPercent || hrPercentPath;
+  maxHeartRate = maxHr || maxHeartRate;
+};
+
+const sendOSCMessage = (path, value) => {
+  if (oscClient) {
+      try {
+          const oscValue = typeof value === 'boolean' ? (value ? 1 : 0) : value;
+          oscClient.send(path, oscValue, () => {
+              console.log(`OSC message sent: ${path} ${oscValue}`);
+          });
+      } catch (error) {
+          console.error('Error sending OSC message:', error);
+      }
+  }
+};
+
+
+
 
 async function createWindow() {
   win = new BrowserWindow({
@@ -82,6 +111,9 @@ async function createWindow() {
     win.webContents.openDevTools()
   }
 
+
+
+
   // Test actively push message to the Electron-Renderer
   win.webContents.on('did-finish-load', () => {
     win?.webContents.send('main-process-message', new Date().toLocaleString())
@@ -89,12 +121,18 @@ async function createWindow() {
 
   // Bluetooth device selection handler
   win.webContents.on('select-bluetooth-device', (ev, deviceList, callback) => {
-    ev.preventDefault()
-    win.webContents.send('ble-scan-devices', deviceList)
-    // TODO: 用户发起连接请求时返回 deviceId
-    callback(deviceList[0].deviceId)
-    // callback('')
-  })
+    ev.preventDefault();
+    console.log('Device list:', deviceList);
+
+    if (Array.isArray(deviceList) && deviceList.length > 0) {
+        win.webContents.send('ble-scan-devices', deviceList);
+        callback(deviceList[0].deviceId); // 仅在 deviceList 有设备时调用
+    } else {
+        console.warn('Device list is empty or not an array');
+        //callback(''); // 传递空字符串或其他合适的值
+    }
+});
+
 
   // Make all links open with the browser, not with the application
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -104,7 +142,27 @@ async function createWindow() {
 
   ipcMain.on('perform-connect', (ev, deviceInfo) => {
     win.webContents.send('require-connect-request', deviceInfo);
-  })
+    // 确保在连接成功后立刻开始发送 OSC 消息
+    if (oscClient) {
+        sendOSCMessage(hrConnectedPath, true); // 连接状态为 1
+    }
+});
+
+ipcMain.on('perform-disconnect', () => {
+  try {
+      if (oscClient) {
+          sendOSCMessage(hrConnectedPath, false); // 连接状态为 0
+      }
+      // 进行其他必要的清理操作
+  } catch (error) {
+      console.error('Error in perform-disconnect:', error);
+  }
+});
+
+
+ipcMain.on('configure-osc', (event, { ip, port, paths, maxHr }) => {
+  configureOSC(ip, port, paths, maxHr);
+});
 
   ipcMain.handle('request-widgets', ev => {
     const widgetMetas = {};
@@ -162,8 +220,17 @@ async function createWindow() {
   // 将在这里分发心率值给其它组件
   ipcMain.on('heart-rate-broadcast', (ev, hr) => {
     if (widgetWindow) widgetWindow.webContents.send('heart-rate-broadcast', hr);
+    if (oscClient) {
+      sendOSCMessage(hrConnectedPath, true);
+      const hrPercent = (hr / maxHeartRate).toFixed(2);
+      sendOSCMessage(hrPercentPath, parseFloat(hrPercent));
+  }
   })
 
+
+
+
+  
   win.addListener('close', (e) => {
     e.preventDefault();
     win.hide();

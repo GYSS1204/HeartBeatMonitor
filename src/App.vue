@@ -130,7 +130,7 @@ watch(isConnected, v => {
   <div>
     <div class="app-top-bar">
       <img class="icon" src="../public/favicon.ico" alt="icon">
-      <span>心动值探测器</span>
+      <span>心率VRCHAT OSC</span>
     </div>
 
     <div class="view-wrapper">

@@ -48,12 +48,17 @@ const store = reactive({
         }
     },
     addOrUpdateScannedDevice(device: any) {
-        const index = this.scan.scannedDevices.findIndex((d: any) => d.deviceId === device.deviceId)
-        if (index === -1) {
-            this.scan.scannedDevices.push(device)
-        } else {
-            this.scan.scannedDevices[index] = device
+        if (!device || !device.deviceId) {
+            console.error("Invalid device object:", device);
+            return;
         }
+        const index = this.scan.scannedDevices.findIndex((d: any) => d.deviceId === device.deviceId);
+        if (index === -1) {
+            this.scan.scannedDevices.push(device);
+        } else {
+            this.scan.scannedDevices[index] = device;
+        }
+    
     },
     clearScannedDevices() {
         this.scan.scannedDevices = []
